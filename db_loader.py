@@ -313,6 +313,26 @@ def get_engine(db_url: str) -> Engine:
     return create_engine(db_url, future=True)
 
 
+def configure_statement_timeout(conn) -> None:
+    """
+    Set a transaction-local statement timeout for the loader session.
+
+    Environment variable:
+    - DB_LOADER_STATEMENT_TIMEOUT_MS
+      - "0" (default): no timeout for statements in this transaction
+      - positive integer: timeout in milliseconds
+    """
+    timeout_raw = str(os.getenv("DB_LOADER_STATEMENT_TIMEOUT_MS", "0")).strip()
+    try:
+        timeout_ms = int(timeout_raw)
+    except ValueError:
+        timeout_ms = 0
+
+    if timeout_ms < 0:
+        timeout_ms = 0
+
+    conn.execute(text("SET LOCAL statement_timeout = :timeout_ms"), {"timeout_ms": timeout_ms})
+
 def get_table_columns(conn, table_name: str) -> set[str]:
     schema, table = table_name.split(".", 1)
     sql = text(
@@ -762,6 +782,7 @@ def process_csv_to_database(csv_path: str | Path, db_url: str, load_type: str = 
     try:
         with engine.begin() as conn:
             raw_table_columns = fetch_raw_table_columns(conn)
+            configure_statement_timeout(conn)
 
             ticket_keys = df["ticket_key"].astype(str).tolist()
             existing_map: dict[str, dict[str, Any]] = {}
